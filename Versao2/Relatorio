@@ -1,0 +1,164 @@
+/**
+ * AUTOMATIZAÇÃO - V2
+ * Arquivo: Relatorios.gs
+ * Função: Gerar relatórios de progresso e fornecer dados ao Painel
+ */
+
+function gerarRelatorioProgresso() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const abaConfig = ss.getSheetByName("CONFIGURAÇÃO");
+
+  if (!abaConfig) return [];
+
+  // 1. CARREGA ESTRUTURA DAS COMISSÕES
+  const dadosConfig = abaConfig.getDataRange().getValues();
+  const estrutura = {}; // { "COMISSÃO A": [ { nome: "ALINE", id: "..." }, ... ] }
+
+  for (let i = 1; i < dadosConfig.length; i++) {
+    const comissao = String(dadosConfig[i][0] || '').trim().toUpperCase();
+    const avaliador = String(dadosConfig[i][2] || '').trim();
+    const idPlanilha = String(dadosConfig[i][3] || '').trim();
+
+    if (comissao && avaliador && idPlanilha) {
+      if (!estrutura[comissao]) estrutura[comissao] = [];
+      estrutura[comissao].push({ nome: avaliador, id: idPlanilha });
+    }
+  }
+
+  const relatorio = [];
+
+  // 2. PROCESSA ACOMPANHAMENTO INDIVIDUAL E DA COMISSÃO
+  Object.keys(estrutura).forEach(comissaoNome => {
+    const listaAvaliadores = estrutura[comissaoNome];
+    const avaliadoresResumo = [];
+
+    listaAvaliadores.forEach(av => {
+      let totalAv = 0;
+      let concluidosAv = 0;
+
+      try {
+        const planAv = SpreadsheetApp.openById(av.id);
+        const abaAval = planAv.getSheetByName("AVALIADOR") || planAv.getSheets()[0];
+        const dadosAval = abaAval.getDataRange().getValues();
+
+        for (let j = 1; j < dadosAval.length; j++) {
+          let idInsc = "";
+
+          // Identifica código de inscrição 'on-'
+          for (let c = 0; c < 3; c++) {
+            const val = String(dadosAval[j][c] || '').trim().toLowerCase();
+            if (val.startsWith("on-")) {
+              idInsc = val;
+              break;
+            }
+          }
+
+          if (idInsc) {
+            totalAv++;
+
+            const parecerTexto = String(dadosAval[j][12] || '').trim(); // Coluna M
+            const notaVal = dadosAval[j][13];                          // Coluna N
+
+            const estaConcluido = parecerTexto !== "" || (notaVal !== "" && notaVal !== null && notaVal !== undefined);
+
+            if (estaConcluido) {
+              concluidosAv++;
+            }
+          }
+        }
+      } catch (e) {
+        Logger.log("Erro no acompanhamento de " + av.nome + ": " + e.message);
+      }
+
+      const pctAv = totalAv > 0 ? Math.round((concluidosAv / totalAv) * 100) : 0;
+      avaliadoresResumo.push({
+        nome: av.nome,
+        total: totalAv,
+        concluidos: concluidosAv,
+        porcentagem: pctAv
+      });
+    });
+
+    // 3. CÁLCULO UNIFICADO DA COMISSÃO
+    const totalProjetosComissao = avaliadoresResumo.length > 0 
+      ? Math.max(...avaliadoresResumo.map(a => a.total)) 
+      : 0;
+
+    const concluidosComissao = avaliadoresResumo.length > 0 
+      ? Math.min(...avaliadoresResumo.map(a => a.concluidos)) 
+      : 0;
+
+    const pctComissao = totalProjetosComissao > 0 
+      ? Math.round((concluidosComissao / totalProjetosComissao) * 100) 
+      : 0;
+
+    relatorio.push({
+      comissao: comissaoNome,
+      total: totalProjetosComissao,
+      concluidos: concluidosComissao,
+      porcentagem: pctComissao,
+      avaliadores: avaliadoresResumo
+    });
+  });
+
+  return relatorio;
+}
+
+/**
+ * Fornece os números dos cards do topo do Painel (Ultrarrápido)
+ */
+function obterMetricasKPI() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const abaInscritos = ss.getSheetByName("INSCRITOS") || ss.getSheets()[0];
+  const abaConfig = ss.getSheetByName("CONFIGURAÇÃO");
+
+  let totalInscritos = 0;
+  if (abaInscritos && abaInscritos.getLastRow() >= 3) {
+    totalInscritos = abaInscritos.getLastRow() - 2;
+  }
+
+  let totalComissoes = 0;
+  let totalAvaliadores = 0;
+
+  if (abaConfig) {
+    const dadosConfig = abaConfig.getDataRange().getValues();
+    const comissoesUnicas = new Set();
+    const avaliadoresUnicos = new Set();
+
+    for (let i = 1; i < dadosConfig.length; i++) {
+      const comissao = String(dadosConfig[i][0] || '').trim().toUpperCase();
+      const avaliador = String(dadosConfig[i][2] || '').trim();
+
+      if (comissao) comissoesUnicas.add(comissao);
+      if (avaliador) avaliadoresUnicos.add(avaliador);
+    }
+
+    totalComissoes = comissoesUnicas.size;
+    totalAvaliadores = avaliadoresUnicos.size;
+  }
+
+  return {
+    inscritos: totalInscritos,
+    comissoes: totalComissoes,
+    avaliadores: totalAvaliadores
+  };
+}
+
+/**
+ * Preenche a lista de comissões nos menus suspensos (selects)
+ */
+function obterListaComissoes() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const abaConfig = ss.getSheetByName("CONFIGURAÇÃO");
+  if (!abaConfig) return [];
+
+  const dados = abaConfig.getDataRange().getValues();
+  const comissoes = new Set();
+
+  for (let i = 1; i < dados.length; i++) {
+    const c = String(dados[i][0] || '').trim().toUpperCase();
+    if (c) comissoes.add(c);
+  }
+
+  return Array.from(comissoes);
+}

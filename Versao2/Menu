@@ -1,0 +1,77 @@
+/**
+ * AUTOMATIZAÇÃO - V2
+ * Arquivo: Menu.gs
+ * Função: Gerenciar menus, modais e pontes de comunicação com o HTML
+ */
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('⚙️ Automatização')
+    .addItem('🚀 Abrir Painel', 'abrirPainel')
+    .addSeparator()
+    .addItem('🔄 Atualizar Planilha', 'onOpen')
+    .addItem('💡 Sobre a Solução', 'mostrarSobre')
+    .addToUi();
+}
+
+function abrirPainel() {
+  const html = HtmlService.createHtmlOutputFromFile('Painel')
+    .setWidth(1100)
+    .setHeight(750);
+  SpreadsheetApp.getUi().showModelessDialog(html, ' ');
+}
+
+function abrirPainelDetalhes() {
+  abrirPainel();
+}
+
+/**
+ * PONTES DE COMUNICAÇÃO (HTML -> OUTROS ARQUIVOS .GS)
+ */
+
+// Ponte para o Sicronizacao.gs
+function sincronizarPorComissao(comissao) {
+  return executarSincronizacao(comissao, false);
+}
+
+// Ponte para o Notas.gs (Uma comissão)
+function puxarNotasPorComissao(comissao) {
+  puxarNotasAvaliadores(comissao);
+  return `Notas da comissão ${comissao} consolidadas com sucesso!`;
+}
+
+// Ponte para o Notas.gs (Todas as comissões)
+function puxarNotasTodasComissoes() {
+  puxarNotasAvaliadores("TODAS");
+  return "Todas as notas foram consolidadas com sucesso!";
+}
+
+/**
+ * MODAL DE INFORMAÇÕES
+ */
+function mostrarSobre() {
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; padding: 20px; text-align: center; }
+        .title { font-size: 16px; font-weight: 800; color: #1e3a8a; }
+        .credits-card { background: #ffffff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px; margin: 16px 0; }
+        .credits-label { font-size: 11px; color: #64748b; font-weight: 700; }
+        .credits-author { font-size: 14px; font-weight: 800; color: #1d4ed8; margin-top: 4px; }
+        .btn-close { background: #2563eb; color: white; border: none; padding: 8px 24px; border-radius: 6px; font-weight: 700; cursor: pointer; }
+      </style>
+    </head>
+    <body>
+      <div class="title">PAINEL DE CONTROLE</div>
+      <div class="credits-card">
+        <div class="credits-label">Idealizado e Desenvolvido</div>
+        <div class="credits-author">Lívia Dantas</div>
+      </div>
+      <button class="btn-close" onclick="google.script.host.close()">ENTENDIDO</button>
+    </body>
+    </html>
+  `;
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(htmlContent).setWidth(360).setHeight(240), ' ');
+}

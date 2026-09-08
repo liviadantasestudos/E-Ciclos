@@ -1,0 +1,227 @@
+/**
+ * Executa a sincronização individual por Prompt de texto.
+ */
+function sincronizarComissaoDigitada() {
+  const ui = SpreadsheetApp.getUi();
+  const resposta = ui.prompt(
+    '🎯 Sincronização Individual',
+    'Digite o nome exato da comissão (ex: COMISSÃO A):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (resposta.getSelectedButton() !== ui.Button.OK) return;
+
+  const comissao = resposta.getResponseText().trim().toUpperCase();
+  if (!comissao) {
+    ui.alert('⚠️ Nenhuma comissão foi digitada.');
+    return;
+  }
+
+  executarSincronizacao(comissao, true);
+}
+
+/**
+ * Executa a sincronização de todas as comissões da aba CONFIGURAÇÃO.
+ */
+function sincronizarTodasComissoes() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const abaConfig = ss.getSheetByName('CONFIGURAÇÃO');
+  const ui = SpreadsheetApp.getUi();
+
+  if (!abaConfig) {
+    if (ui) ui.alert('❌ Erro: Aba "CONFIGURAÇÃO" não encontrada.');
+    return '❌ Erro: Aba CONFIGURAÇÃO ausente';
+  }
+
+  const comissoesUnicas = obterListaComissoes();
+  if (comissoesUnicas.length === 0) {
+    if (ui) ui.alert('⚠️ Nenhuma comissão encontrada na aba CONFIGURAÇÃO.');
+    return '⚠️ Nenhuma comissão configurada';
+  }
+
+  const resumo = comissoesUnicas.map(comissao => executarSincronizacao(comissao, false));
+  return `✨ SINCRONIZAÇÃO CONCLUÍDA ✨\n---------------------------------------------\n` + resumo.join('\n');
+}
+
+/**
+ * Função principal de sincronização de dados por comissão.
+ */
+function executarSincronizacao(comissaoAlvo, exibirAlerta = false) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const abaInscritos = ss.getSheetByName('INSCRITOS');
+  const abaConfig = ss.getSheetByName('CONFIGURAÇÃO');
+  const ui = SpreadsheetApp.getUi();
+
+  if (!abaInscritos || !abaConfig) {
+    if (exibirAlerta && ui) ui.alert('❌ Erro: Certifique-se de ter as abas "INSCRITOS" e "CONFIGURAÇÃO".');
+    return `❌ ${comissaoAlvo}: Erro nas abas`;
+  }
+
+  const dadosConfig = abaConfig.getDataRange().getValues();
+  const idsAvaliadores = [];
+  let idControle = '';
+
+  for (let i = 1; i < dadosConfig.length; i++) {
+    const comissaoConfig = String(dadosConfig[i][0] || '').trim().toUpperCase();
+    const idPlanilhaAval = String(dadosConfig[i][3] || '').trim();
+    const idPlanilhaCtrl = String(dadosConfig[i][4] || '').trim();
+
+    if (comissaoConfig === comissaoAlvo) {
+      if (idPlanilhaAval !== '' && !idsAvaliadores.includes(idPlanilhaAval)) {
+        idsAvaliadores.push(idPlanilhaAval);
+      }
+      if (idPlanilhaCtrl !== '' && !idControle) {
+        idControle = idPlanilhaCtrl;
+      }
+    }
+  }
+
+  if (idsAvaliadores.length === 0 && !idControle) {
+    if (exibirAlerta && ui) ui.alert(`⚠️ Nenhum ID encontrado para a "${comissaoAlvo}".`);
+    return `⚠️ ${comissaoAlvo}: Sem IDs configurados`;
+  }
+
+  const rangeInscritos = abaInscritos.getDataRange();
+  const dadosInscritos = rangeInscritos.getValues();
+  const displayInscritos = rangeInscritos.getDisplayValues(); 
+  const richTextValues = rangeInscritos.getRichTextValues();
+
+  const novosProjetosChave = [];
+  const dadosPrincipais = [];
+  const dadosPontosExtra = [];
+
+  for (let i = 2; i < dadosInscritos.length; i++) {
+    const comissaoInscritos = String(dadosInscritos[i][40] || '').trim().toUpperCase();
+
+    if (comissaoInscritos === comissaoAlvo) {
+      const idChave = String(displayInscritos[i][1] || '').trim().toUpperCase();
+
+      if (idChave) {
+        novosProjetosChave.push(idChave);
+        dadosPrincipais.push([
+          richTextValues[i][1],
+          richTextValues[i][2],
+          richTextValues[i][3]
+        ]);
+
+        const pontoTesouro = dadosInscritos[i][32] !== '' ? dadosInscritos[i][32] : 0;
+        const pontoSeminario = dadosInscritos[i][33] !== '' ? dadosInscritos[i][33] : 0;
+        dadosPontosExtra.push([pontoTesouro, pontoSeminario]);
+      }
+    }
+  }
+
+  const qteLinhas = dadosPrincipais.length;
+  if (qteLinhas === 0) {
+    if (exibirAlerta && ui) ui.alert(`⚠️ Nenhum inscrito encontrado para a "${comissaoAlvo}".`);
+    return `⚠️ ${comissaoAlvo}: 0 projetos`;
+  }
+
+  if (idControle) {
+    try {
+      const docControle = SpreadsheetApp.openById(idControle);
+      const abaControle = docControle.getSheetByName('CONTROLE') || docControle.getSheets()[0];
+
+      if (abaControle) {
+        const ultimaLinhaCtrl = abaControle.getLastRow();
+        if (ultimaLinhaCtrl >= 2) {
+          abaControle.getRange(2, 1, ultimaLinhaCtrl - 1, 3).clearContent();
+        }
+        abaControle.getRange(2, 1, qteLinhas, 3).setRichTextValues(dadosPrincipais);
+      }
+    } catch (e) {
+      console.error(`Erro Controle (${comissaoAlvo}): ${e.message}`);
+    }
+  }
+
+  idsAvaliadores.forEach(idPlanilha => {
+    try {
+      const docAvaliador = SpreadsheetApp.openById(idPlanilha);
+      const abaAvaliador = docAvaliador.getSheetByName('AVALIADOR') || docAvaliador.getSheets()[0];
+
+      if (abaAvaliador) {
+        const ultimaLinha = abaAvaliador.getLastRow();
+        const mapaNotasExistentes = {};
+
+        if (ultimaLinha >= 2) {
+          const rangeAvaliador = abaAvaliador.getRange(2, 1, ultimaLinha - 1, 13);
+          const displayAvaliador = rangeAvaliador.getDisplayValues();
+          const valoresAvaliador = rangeAvaliador.getValues();
+
+          for (let row = 0; row < displayAvaliador.length; row++) {
+            const numInscricao = String(displayAvaliador[row][0] || '').trim().toUpperCase();
+
+            if (numInscricao) {
+              mapaNotasExistentes[numInscricao] = {
+                criterios: [
+                  valoresAvaliador[row][3], valoresAvaliador[row][4], 
+                  valoresAvaliador[row][5], valoresAvaliador[row][6], 
+                  valoresAvaliador[row][7], valoresAvaliador[row][8], 
+                  valoresAvaliador[row][9]
+                ],
+                parecer: valoresAvaliador[row][12]
+              };
+            }
+          }
+          rangeAvaliador.clearContent();
+        }
+
+        const matrizNotasRestauradas = [];
+        const matrizParecerRestaurado = [];
+
+        novosProjetosChave.forEach(idChave => {
+          if (mapaNotasExistentes[idChave]) {
+            matrizNotasRestauradas.push(mapaNotasExistentes[idChave].criterios);
+            matrizParecerRestaurado.push([mapaNotasExistentes[idChave].parecer]);
+          } else {
+            matrizNotasRestauradas.push(['', '', '', '', '', '', '']);
+            matrizParecerRestaurado.push(['']);
+          }
+        });
+
+        abaAvaliador.getRange(2, 1, qteLinhas, 3).setRichTextValues(dadosPrincipais);
+        abaAvaliador.getRange(2, 4, qteLinhas, 7).setValues(matrizNotasRestauradas);
+        abaAvaliador.getRange(2, 11, qteLinhas, 2).setValues(dadosPontosExtra);
+        abaAvaliador.getRange(2, 13, qteLinhas, 1).setValues(matrizParecerRestaurado);
+      }
+    } catch (e) {
+      console.error(`Erro Avaliador (${comissaoAlvo}): ${e.message}`);
+    }
+  });
+
+  const textoFinal = `✅ ${comissaoAlvo} ➔ ${qteLinhas} projetos`;
+
+  if (exibirAlerta && ui) {
+    ui.alert(`✨ Sincronização concluída!\n\n${textoFinal}`);
+  }
+
+  return textoFinal;
+}
+
+/**
+ * Retorna lista única de comissões.
+ */
+function obterListaComissoes() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const abaConfig = ss.getSheetByName('CONFIGURAÇÃO');
+  if (!abaConfig) return [];
+
+  const dados = abaConfig.getDataRange().getValues();
+  return [...new Set(
+    dados.slice(1)
+      .map(row => String(row[0] || '').trim().toUpperCase())
+      .filter(c => c !== '')
+  )];
+}
+
+/**
+ * Retorna contagem de inscritos.
+ */
+function obterTotalInscritos() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const abaInscritos = ss.getSheetByName('INSCRITOS');
+  if (!abaInscritos) return 0;
+  
+  const ultimaLinha = abaInscritos.getLastRow();
+  return ultimaLinha > 2 ? (ultimaLinha - 2) : 0;
+}

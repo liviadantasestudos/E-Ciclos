@@ -1,0 +1,114 @@
+function puxarNotasAvaliadores(nomeComissao) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const abaConfig = ss.getSheetByName("CONFIGURAÇÃO");
+  const abaInscritos = ss.getSheetByName("INSCRITOS") || ss.getSheets()[0]; 
+
+  if (!abaConfig || !abaInscritos) {
+    throw new Error("Não foi possível encontrar a aba CONFIGURAÇÃO ou INSCRITOS.");
+  }
+
+  const ehModoFiltrado = nomeComissao && nomeComissao !== "TODAS";
+  const comissaoFiltroNorm = ehModoFiltrado ? String(nomeComissao).trim().toUpperCase() : "";
+
+  // 1. CARREGA CONFIGURAÇÕES
+  const dadosConfig = abaConfig.getDataRange().getValues();
+  const mapaAvaliadores = {};
+  const ordemComissoes = {};
+
+  for (let i = 1; i < dadosConfig.length; i++) {
+    const comissao = String(dadosConfig[i][0]).trim().toUpperCase();
+    const nomeAv = String(dadosConfig[i][2]).trim();
+    const idPlanilha = String(dadosConfig[i][3]).trim();
+
+    if (nomeAv && idPlanilha) mapaAvaliadores[nomeAv] = idPlanilha;
+    if (comissao && nomeAv) {
+      if (!ordemComissoes[comissao]) ordemComissoes[comissao] = [];
+      ordemComissoes[comissao].push(nomeAv);
+    }
+  }
+
+  // 2. LEITURA DOS INSCRITOS (Linha 3 em diante)
+  const linhaInicial = 3;
+  const ultimaLinha = abaInscritos.getLastRow();
+  if (ultimaLinha < linhaInicial) return;
+
+  const totalLinhas = ultimaLinha - (linhaInicial - 1);
+
+  // Coluna B = Inscrição | Coluna AO = Comissão
+  const inscricoes = abaInscritos.getRange(linhaInicial, 2, totalLinhas, 1).getValues();
+  const comissoes = abaInscritos.getRange(linhaInicial, 41, totalLinhas, 1).getValues();
+  const notasAtuais = abaInscritos.getRange(linhaInicial, 42, totalLinhas, 3).getValues(); // AP, AQ, AR
+
+  // 3. CACHE DE LEITURA DAS PLANILHAS DOS AVALIADORES
+  const cacheNotas = {};
+
+  function obterNotaAvaliador(nomeAvaliador, idInscricao) {
+    const idPlanilha = mapaAvaliadores[nomeAvaliador];
+    const chaveInsc = String(idInscricao).trim().toLowerCase();
+    
+    if (!idPlanilha || !chaveInsc) return '';
+
+    if (!cacheNotas[nomeAvaliador]) {
+      try {
+        const spreadsheetAvaliador = SpreadsheetApp.openById(idPlanilha);
+        const abaAval = spreadsheetAvaliador.getSheetByName("AVALIADOR") || spreadsheetAvaliador.getSheets()[0];
+        const dadosAval = abaAval.getDataRange().getValues();
+        
+        cacheNotas[nomeAvaliador] = {};
+
+        // Mapeia Inscrição -> Nota (Coluna N - Índice 13)
+        for (let j = 1; j < dadosAval.length; j++) {
+          let idEncontrado = "";
+
+          for (let col = 0; col < 3; col++) {
+            const val = String(dadosAval[j][col]).trim().toLowerCase();
+            if (val.startsWith("on-")) {
+              idEncontrado = val;
+              break;
+            }
+          }
+
+          if (idEncontrado) {
+            const valNota = dadosAval[j][13];
+            // 🎯 CORREÇÃO: Trata notas com valor 0 explicitamente como válidas
+            if (valNota !== "" && valNota !== null && valNota !== undefined) {
+              cacheNotas[nomeAvaliador][idEncontrado] = valNota;
+            }
+          }
+        }
+      } catch (err) {
+        Logger.log('Erro ao ler a aba AVALIADOR de ' + nomeAvaliador + ': ' + err.message);
+        cacheNotas[nomeAvaliador] = {};
+      }
+    }
+
+    // Retorna a nota cadastrada (mesmo que seja 0); se não existir, retorna vazio
+    const notaRes = cacheNotas[nomeAvaliador][chaveInsc];
+    return (notaRes !== undefined) ? notaRes : '';
+  }
+
+  // 4. MONTA A MATRIZ DE NOTAS
+  const matrizNotas = [];
+
+  for (let i = 0; i < totalLinhas; i++) {
+    const idInsc = inscricoes[i][0];
+    const comissaoLinha = String(comissoes[i][0]).trim().toUpperCase();
+    
+    const deveProcessar = !ehModoFiltrado || (comissaoLinha === comissaoFiltroNorm);
+
+    if (deveProcessar && idInsc) {
+      const listaAvaliadores = ordemComissoes[comissaoLinha] || [];
+
+      const nota1 = listaAvaliadores[0] ? obterNotaAvaliador(listaAvaliadores[0], idInsc) : '';
+      const nota2 = listaAvaliadores[1] ? obterNotaAvaliador(listaAvaliadores[1], idInsc) : '';
+      const nota3 = listaAvaliadores[2] ? obterNotaAvaliador(listaAvaliadores[2], idInsc) : '';
+
+      matrizNotas.push([nota1, nota2, nota3]);
+    } else {
+      matrizNotas.push([notasAtuais[i][0], notasAtuais[i][1], notasAtuais[i][2]]);
+    }
+  }
+
+  // 5. ATUALIZA AS COLUNAS AP, AQ, AR
+  abaInscritos.getRange(linhaInicial, 42, matrizNotas.length, 3).setValues(matrizNotas);
+}
